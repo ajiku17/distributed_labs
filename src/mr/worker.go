@@ -1,10 +1,47 @@
 package mr
 
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
+import (
+	"fmt"
+ 	"log"
+ 	"net/rpc"
+	"hash/fnv"
+	"time"
+	"os"
+)
 
+const (
+	MAP_TASK int = 1
+	REDUCE_TASK int = 2
+	WAIT_TASK int = 3
+	POISON_TASK int = 4
+)
+
+type PoisonTask struct {
+	
+}
+
+type WaitTask struct {
+	TimeToSleep time.Duration
+}
+
+type MapTask struct {
+	MapTaskID	int
+	InFileName 	string
+	Offset		int
+	Size		int
+	NumReducers int
+}
+
+type ReduceTask struct {
+	ReducetTaskID int
+	InFilenames   []string
+	OutFilename   string
+}
+
+type Task struct {
+	TaskType int
+	Task interface{}
+}
 
 //
 // Map functions return a slice of KeyValue.
@@ -24,6 +61,8 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+var mapfn func(string, string) []KeyValue
+var reducefn func(string, []string) string
 
 //
 // main/mrworker.go calls this function.
@@ -35,7 +74,76 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// uncomment to send the Example RPC to the master.
 	// CallExample()
+	mapfn = mapf
+	reducefn = reducef
 
+	for {
+		task, status := RequestTask();
+		if status {
+			ProcessTask(task)
+			CallTaskDone(task)
+		} else {
+			fmt.Println("Master Didn't respond, Exiting with code 3")
+			os.Exit(3)
+		}	
+	}
+}
+
+func CallTaskDone(task TaskObject) bool{
+	args := TaskDoneArgs{}
+	reply := TaskDoneReply{}
+
+	status := call("Master.TaskDone", &args, &reply)
+	
+	return status
+}
+
+func ProcessTask(task TaskObject) {
+	switch task.Task.TaskType {
+	case MAP_TASK:
+		t, ok := task.Task.Task.(MapTask)
+		if ok {
+
+		} else {
+			fmt.Println("Unknown task type", t)
+		}
+	case REDUCE_TASK:
+		t, ok := task.Task.Task.(ReduceTask)
+		if ok {
+
+		} else {
+			fmt.Println("Unknown task type", t)
+		}
+	case WAIT_TASK:
+		t, ok := task.Task.Task.(WaitTask)
+		if ok {
+			time.Sleep(t.TimeToSleep * time.Second)
+		} else {
+			fmt.Println("Unknown task type", t)
+		}
+	case POISON_TASK:
+		t, ok := task.Task.Task.(PoisonTask)
+		if ok {
+			os.Exit(3)
+		} else {
+			fmt.Println("Unknown task type", t)
+		}
+
+	}
+}
+
+func RequestTask() (TaskObject, bool){
+	t, status := CallGetTask()
+	return t, status
+}
+
+func CallGetTask() (TaskObject, bool) {
+	args := GetTaskArgs{}
+	reply := GetTaskReply{}
+
+	status := call("Master.GetTask", &args, &reply)
+	
+	return reply.TaskObj, status
 }
 
 //

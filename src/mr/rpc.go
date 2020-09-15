@@ -9,6 +9,22 @@ package mr
 import "os"
 import "strconv"
 
+type GetTaskArgs struct {
+
+}
+
+type GetTaskReply struct {
+	TaskObj TaskObject
+}
+
+type TaskDoneArgs struct {
+	TaskObj TaskObject
+}
+
+type TaskDoneReply struct {
+
+}
+
 //
 // example to show how to declare the arguments
 // and reply for an RPC.
