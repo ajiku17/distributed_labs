@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"time"
 	"os"
+	"encoding/gob"
 )
 
 const (
@@ -72,6 +73,11 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
+	gob.Register(TaskObject{})
+	gob.Register(ReduceTask{})
+	gob.Register(MapTask{})
+	gob.Register(WaitTask{})
+	gob.Register(PoisonTask{})
 
 	// uncomment to send the Example RPC to the master.
 	// CallExample()
@@ -91,33 +97,40 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 func CallTaskDone(taskObj TaskObject) bool{
+	fmt.Println("calling task done")
 	args := TaskDoneArgs{}
 	reply := TaskDoneReply{}
 
+	args.TaskObj = taskObj
+
 	status := call("Master.TaskDone", &args, &reply)
+
+	fmt.Println("call task done returned")
 	
 	return status
 }
 
 func ProcessTask(taskObj TaskObject) {
+	fmt.Println("processing task")
 	switch taskObj.TaskType {
 	case MAP_TASK:
 		t, ok := taskObj.Task.(MapTask)
 		if ok {
-
+			fmt.Println("Processing map task", t)
 		} else {
 			fmt.Println("Unknown task type", t)
 		}
 	case REDUCE_TASK:
 		t, ok := taskObj.Task.(ReduceTask)
 		if ok {
-
+			fmt.Println("Processing reduce task", t)
 		} else {
 			fmt.Println("Unknown task type", t)
 		}
 	case WAIT_TASK:
 		t, ok := taskObj.Task.(WaitTask)
 		if ok {
+			fmt.Println("Processing wait task", t)
 			time.Sleep(t.TimeToSleep * time.Second)
 		} else {
 			fmt.Println("Unknown task type", t)
@@ -125,6 +138,7 @@ func ProcessTask(taskObj TaskObject) {
 	case POISON_TASK:
 		t, ok := taskObj.Task.(PoisonTask)
 		if ok {
+			fmt.Println("Processing poison task", t)
 			os.Exit(3)
 		} else {
 			fmt.Println("Unknown task type", t)
@@ -134,7 +148,9 @@ func ProcessTask(taskObj TaskObject) {
 }
 
 func RequestTask() (TaskObject, bool){
+	fmt.Println("requesting task")
 	t, status := CallGetTask()
+	fmt.Println("received a task")
 	return t, status
 }
 
@@ -184,7 +200,9 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	}
 	defer c.Close()
 
+	fmt.Println("calling ...")
 	err = c.Call(rpcname, args, reply)
+	fmt.Println("call returned")
 	if err == nil {
 		return true
 	}
