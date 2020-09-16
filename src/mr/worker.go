@@ -209,7 +209,7 @@ func ProcessTask(taskObj TaskObject) bool {
 
 			sort.Sort(ByKey(kva))
 
-			ofile, _ := os.Create(t.OutFilename)
+			tmpOut, _ := ioutil.TempFile(".", "tmp-out-*")
 
 			//
 			// call Reduce on each distinct key in intermediate[],
@@ -228,12 +228,14 @@ func ProcessTask(taskObj TaskObject) bool {
 				output := reducefn(kva[i].Key, values)
 
 				// this is the correct format for each line of Reduce output.
-				fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
+				fmt.Fprintf(tmpOut, "%v %v\n", kva[i].Key, output)
 
 				i = j
 			}
 
-			ofile.Close()
+			tmpOut.Close()
+
+			os.Rename(tmpOut.Name(), t.OutFilename)
 
 		} else {
 			fmt.Println("Unknown task type", t)
