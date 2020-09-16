@@ -11,11 +11,6 @@ import (
 	"time"
 )
 
-type TaskObject struct {
-	ID 	 int
-	Task Task
-}
-
 type Master struct {
 	// Your definitions here.
 	nextTaskID		  int
@@ -51,15 +46,21 @@ func (m *Master) GetNextTaskID() int {
 func (m *Master) PhaseMonitor() {
 
 	// TODO generate map tasks
+	fmt.Println("generating map tasks")
 
+	fmt.Println("waiting for map tasks")
 	m.waitGroup.Wait() // wait for map tasks to finish
 	
 	// TODO generate reduce tasks
-	
+	fmt.Println("generating reduce tasks")
+
+	fmt.Println("waiting for reduce tasks tasks")
 	m.waitGroup.Wait() // wait for reduce tasks to finish
 	
 	// TODO generate poison tasks
+	fmt.Println("generating poison tasks")
 
+	fmt.Println("marking self as done")
 	m.mu.Lock()
 	m.done = true
 	m.mu.Unlock()
@@ -69,8 +70,12 @@ func (m *Master) MarkTaskAsDone(taskID int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	fmt.Println("Marking task:", taskID, "as done")
+
 	isDone, ok := m.doneTasks[taskID]
-	if !ok || !isDone {
+	if !ok{
+		fmt.Println("received done on unknown task:", taskID)
+	} else if !isDone {
 		m.doneTasks[taskID] = true
 		m.waitGroup.Add(1)
 	}
@@ -82,6 +87,7 @@ func (m *Master) watchdog(taskID int, doneChannel chan int) {
 	select {
 	case <- timeout:
 		// TODO reschedule
+		fmt.Println("rescheduling task:", taskID)
 	case <- doneChannel:
 		m.MarkTaskAsDone(taskID)
 	}
@@ -90,13 +96,11 @@ func (m *Master) watchdog(taskID int, doneChannel chan int) {
 func (m *Master) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 
 	if len(m.unscheduledTasks) == 0 {
-		task := TaskObject{
+		task := Task{
 			m.GetNextTaskID(),
-			Task{
-				WAIT_TASK,
-				WaitTask{
-					2,
-				},
+			WAIT_TASK,
+			WaitTask{
+				2,
 			},
 		}
 
@@ -107,7 +111,6 @@ func (m *Master) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 
 		task := m.unscheduledTasks[0]
 		m.unscheduledTasks = m.unscheduledTasks[1:]
-		
 
 		reply.TaskObj = task
 		go m.watchdog(task.ID, m.currentPhaseTasks[task.ID])
@@ -135,7 +138,7 @@ func (m *Master) server() {
 	rpc.Register(m)
 	rpc.HandleHTTP()
 
-	gob.Register(Task{})
+	gob.Register(TaskObject{})
 	gob.Register(ReduceTask{})
 	gob.Register(MapTask{})
 	gob.Register(WaitTask{})

@@ -38,9 +38,10 @@ type ReduceTask struct {
 	OutFilename   string
 }
 
-type Task struct {
+type TaskObject struct {
+	ID		 int
 	TaskType int
-	Task interface{}
+	Task 	 interface{}
 }
 
 //
@@ -89,7 +90,7 @@ func Worker(mapf func(string, string) []KeyValue,
 	}
 }
 
-func CallTaskDone(task TaskObject) bool{
+func CallTaskDone(taskObj TaskObject) bool{
 	args := TaskDoneArgs{}
 	reply := TaskDoneReply{}
 
@@ -98,31 +99,31 @@ func CallTaskDone(task TaskObject) bool{
 	return status
 }
 
-func ProcessTask(task TaskObject) {
-	switch task.Task.TaskType {
+func ProcessTask(taskObj TaskObject) {
+	switch taskObj.TaskType {
 	case MAP_TASK:
-		t, ok := task.Task.Task.(MapTask)
+		t, ok := taskObj.Task.(MapTask)
 		if ok {
 
 		} else {
 			fmt.Println("Unknown task type", t)
 		}
 	case REDUCE_TASK:
-		t, ok := task.Task.Task.(ReduceTask)
+		t, ok := taskObj.Task.(ReduceTask)
 		if ok {
 
 		} else {
 			fmt.Println("Unknown task type", t)
 		}
 	case WAIT_TASK:
-		t, ok := task.Task.Task.(WaitTask)
+		t, ok := taskObj.Task..(WaitTask)
 		if ok {
 			time.Sleep(t.TimeToSleep * time.Second)
 		} else {
 			fmt.Println("Unknown task type", t)
 		}
 	case POISON_TASK:
-		t, ok := task.Task.Task.(PoisonTask)
+		t, ok := taskObj.Task.(PoisonTask)
 		if ok {
 			os.Exit(3)
 		} else {
