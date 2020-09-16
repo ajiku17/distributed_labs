@@ -200,6 +200,11 @@ func ProcessTask(taskObj TaskObject) bool {
 					}
 					kva = append(kva, kv)
 				}
+
+				err = os.Remove(filename)
+				if err != nil {
+					fmt.Print("Error", err)
+				}
 			}
 
 			sort.Sort(ByKey(kva))
