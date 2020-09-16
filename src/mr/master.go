@@ -89,9 +89,6 @@ func (m *Master) generateReduceTasks(nReduce int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// ReducetTaskID int
-	// InFilenames   []string
-	// OutFilename   string
 	for reducer := 1; reducer <= nReduce; reducer++ {
 		inFilenames := []string{}
 		for mapper := 1; mapper <= m.mappers; mapper++ {

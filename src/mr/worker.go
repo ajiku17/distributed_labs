@@ -8,6 +8,8 @@ import (
 	"time"
 	"os"
 	"encoding/gob"
+	"io/ioutil"
+	"encoding/json"
 )
 
 const (
@@ -27,7 +29,7 @@ type WaitTask struct {
 
 type MapTask struct {
 	MapTaskID	int
-	InFileName 	string
+	InFilename 	string
 	NumReducers int
 }
 
@@ -85,8 +87,12 @@ func Worker(mapf func(string, string) []KeyValue,
 	for {
 		task, status := RequestTask();
 		if status {
-			ProcessTask(task)
-			CallTaskDone(task)
+			status = ProcessTask(task)
+			if status {
+				CallTaskDone(task)
+			} else {
+				fmt.Println("!!!!!!!!!ERROR processing task")
+			}
 		} else {
 			fmt.Println("Master Didn't respond, Exiting with code 3")
 			os.Exit(3)
@@ -108,13 +114,59 @@ func CallTaskDone(taskObj TaskObject) bool{
 	return status
 }
 
-func ProcessTask(taskObj TaskObject) {
+func ProcessTask(taskObj TaskObject) bool {
 	fmt.Println("processing task")
 	switch taskObj.TaskType {
 	case MAP_TASK:
 		t, ok := taskObj.Task.(MapTask)
 		if ok {
-			fmt.Println("Processing map task", t)
+			file, err := os.Open(t.InFilename)
+			if err != nil {
+				fmt.Printf("cannot open %v", t.InFilename)
+				return false
+			}
+
+			content, err := ioutil.ReadAll(file)
+			if err != nil {
+				log.Fatalf("cannot read %v", t.InFilename)
+			}
+			file.Close()
+			kva := mapfn(t.InFilename, string(content))
+
+
+			tempEncoders := make(map[int]*json.Encoder)
+			tempFiles := make(map[int]*os.File)
+
+			for _, kv := range kva {
+				reducerID := ihash(kv.Key) % t.NumReducers + 1
+				tmpEncoder, ok := tempEncoders[reducerID]
+				var encoder *json.Encoder
+				
+				if ok {
+					encoder = tmpEncoder
+				} else {
+					tmpfile, err := ioutil.TempFile(".", "tmp-file-*")
+					if err != nil {
+						fmt.Println("Error", err)
+						return false
+					}
+					tempFiles[reducerID] = tmpfile
+					tempEncoders[reducerID] = json.NewEncoder(tmpfile)
+					encoder = tempEncoders[reducerID]
+				}
+
+				err := encoder.Encode(&kv)
+				if err != nil {
+					fmt.Println("Error", err)
+					return false
+				}
+			}
+
+			for reducerID, tmpfile := range tempFiles {
+				tmpfile.Close()
+				os.Rename(tmpfile.Name(), fmt.Sprintf("mr-%d-%d", t.MapTaskID, reducerID))
+			}
+
 		} else {
 			fmt.Println("Unknown task type", t)
 		}
@@ -143,6 +195,8 @@ func ProcessTask(taskObj TaskObject) {
 		}
 
 	}
+
+	return true
 }
 
 func RequestTask() (TaskObject, bool){
