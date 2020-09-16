@@ -10,7 +10,6 @@ import (
 	"sync"
 	"time"
 	"fmt"
-	"math"
 )
 
 type Master struct {
@@ -22,6 +21,8 @@ type Master struct {
 	mu 			      sync.Mutex
 	waitGroup		  sync.WaitGroup
 	done 			  bool
+	mappers 		  int
+	reducers 		  int
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -56,44 +57,30 @@ func (m *Master) generateMapTasks(files []string, nReduce int) {
 
 	for _, filename := range files {
 		fmt.Println("chopping up", filename)
-		curOffset := 0
-		info, err := os.Stat(filename)
+		_, err := os.Stat(filename)
 		if err == nil {
-			fileSize := int(info.Size())
-			sizeLeft := fileSize
-			fmt.Println("sizeLeft", sizeLeft)
-			for curOffset < fileSize {
-				
-				size := int(math.Min(float64(taskSize), float64(sizeLeft)))	
-				
-				task := TaskObject {
-					m.nextTaskID,
-					MAP_TASK,
-					MapTask {
-						mapTaskID,
-						filename,
-						curOffset,
-						size,
-						nReduce,
-					},
-				}
-
-				fmt.Println(task)
-
-				mapTaskID++;
-				m.nextTaskID++
-
-				m.unscheduledTasks = append(m.unscheduledTasks, task)
-				m.currentPhaseTasks[task.ID] = make(chan int, 1)
-				m.doneTasks[task.ID] = false
-
-				m.waitGroup.Add(1)
-				
-				curOffset += size
-				sizeLeft -= size
-
-				fmt.Println("next offset", curOffset, "filesize left", fileSize)
+			task := TaskObject {
+				m.nextTaskID,
+				MAP_TASK,
+				MapTask {
+					mapTaskID,
+					filename,
+					nReduce,
+				},
 			}
+
+			fmt.Println(task)
+
+			mapTaskID++;
+			m.nextTaskID++
+			m.mappers++;
+
+			m.unscheduledTasks = append(m.unscheduledTasks, task)
+			m.currentPhaseTasks[task.ID] = make(chan int, 1)
+			m.doneTasks[task.ID] = false
+
+			m.waitGroup.Add(1)
+			
 		}
 	}
 }
@@ -101,12 +88,40 @@ func (m *Master) generateMapTasks(files []string, nReduce int) {
 func (m *Master) generateReduceTasks(nReduce int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// ReducetTaskID int
+	// InFilenames   []string
+	// OutFilename   string
+	for reducer := 1; reducer <= nReduce; reducer++ {
+		inFilenames := []string{}
+		for mapper := 1; mapper <= m.mappers; mapper++ {
+			inFilenames = append(inFilenames, fmt.Sprintf("mr-%d-%d", mapper, reducer))
+		}
+		
+		task := TaskObject {
+			m.nextTaskID,
+			REDUCE_TASK,
+			ReduceTask {
+				reducer,
+				inFilenames,
+				fmt.Sprintf("mr-out-%d", reducer),
+			},
+		}
+		m.nextTaskID++
+
+		m.unscheduledTasks = append(m.unscheduledTasks, task)
+		m.currentPhaseTasks[task.ID] = make(chan int, 1)
+		m.doneTasks[task.ID] = false
+
+		m.waitGroup.Add(1)
+	}
 }
 
 func (m *Master) clearPhaseTasks() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	fmt.Println("clearing phase tasks")
 	m.currentPhaseTasks = make(map[int]chan int)
 	m.doneTasks = make(map[int]bool)
 	m.unscheduledTasks = []TaskObject{}
@@ -115,24 +130,26 @@ func (m *Master) clearPhaseTasks() {
 
 func (m *Master) PhaseMonitor(files []string, nReduce int) {
 
-	// TODO generate map tasks
+	fmt.Println("================== MAP PHASE START ===================")
 	fmt.Println("generating map tasks")
 	m.generateMapTasks(files, nReduce)
 
 	fmt.Println("waiting for map tasks")
 	m.waitGroup.Wait() // wait for map tasks to finish
+	fmt.Println("================== MAP PHASE FINISHED ===================")
 	
 	m.clearPhaseTasks()
 
-	// TODO generate reduce tasks
+	fmt.Println("================== REDUCE PHASE START ===================")
 	fmt.Println("generating reduce tasks")
 	m.generateReduceTasks(nReduce)
 
 	fmt.Println("waiting for reduce tasks tasks")
 	m.waitGroup.Wait() // wait for reduce tasks to finish
-	
+	fmt.Println("================== REDUCE PHASE FINISHED ===================")
+
 	m.clearPhaseTasks()
-	// TODO generate poison tasks
+	// TODO generate poison tasks (optional)
 	fmt.Println("generating poison tasks")
 
 	fmt.Println("marking self as done")
@@ -157,15 +174,23 @@ func (m *Master) MarkTaskAsDone(taskID int) {
 	}
 }
 
-func (m *Master) watchdog(taskID int, doneChannel chan int) {
+func (m *Master) rescheduleTask(task TaskObject) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.unscheduledTasks = append(m.unscheduledTasks, task)
+}
+
+func (m *Master) watchdog(task TaskObject, doneChannel chan int) {
 	timeout := time.After(10 * time.Second)
 
 	select {
 	case <- timeout:
 		// TODO reschedule
-		fmt.Println("rescheduling task:", taskID)
+		m.rescheduleTask(task)
+		fmt.Println("rescheduling task:", task)
 	case <- doneChannel:
-		m.MarkTaskAsDone(taskID)
+		m.MarkTaskAsDone(task.ID)
 	}
 }
 
@@ -191,7 +216,7 @@ func (m *Master) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 		m.unscheduledTasks = m.unscheduledTasks[1:]
 
 		reply.TaskObj = task
-		go m.watchdog(task.ID, m.currentPhaseTasks[task.ID])
+		go m.watchdog(task, m.currentPhaseTasks[task.ID])
 	}
 
 	fmt.Println("get task returns")	
@@ -261,6 +286,8 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m.currentPhaseTasks = make(map[int]chan int)
 	m.unscheduledTasks = []TaskObject{}
 	m.doneTasks = make(map[int]bool)
+	m.reducers = nReduce
+	m.mappers = 0
 	m.done = false
 
 	m.server()

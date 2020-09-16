@@ -28,8 +28,6 @@ type WaitTask struct {
 type MapTask struct {
 	MapTaskID	int
 	InFileName 	string
-	Offset		int
-	Size		int
 	NumReducers int
 }
 
