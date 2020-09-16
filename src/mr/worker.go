@@ -201,7 +201,7 @@ func ProcessTask(taskObj TaskObject) bool {
 					kva = append(kva, kv)
 				}
 
-				err = os.Remove(filename)
+
 				if err != nil {
 					fmt.Print("Error", err)
 				}
@@ -235,7 +235,12 @@ func ProcessTask(taskObj TaskObject) bool {
 
 			tmpOut.Close()
 
-			os.Rename(tmpOut.Name(), t.OutFilename)
+			err := os.Rename(tmpOut.Name(), t.OutFilename)
+			if err == nil {
+				for _, filename := range t.InFilenames {
+					err = os.Remove(filename)
+				}
+			}
 
 		} else {
 			fmt.Println("Unknown task type", t)
