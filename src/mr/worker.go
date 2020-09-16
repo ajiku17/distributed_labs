@@ -10,6 +10,7 @@ import (
 	"encoding/gob"
 	"io/ioutil"
 	"encoding/json"
+	"sort"
 )
 
 const (
@@ -52,6 +53,12 @@ type KeyValue struct {
 	Key   string
 	Value string
 }
+
+type ByKey []KeyValue
+
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // use ihash(key) % NReduce to choose the reduce
@@ -174,6 +181,53 @@ func ProcessTask(taskObj TaskObject) bool {
 		t, ok := taskObj.Task.(ReduceTask)
 		if ok {
 			fmt.Println("Processing reduce task", t)
+
+			kva := []KeyValue{}
+
+			for _, filename := range t.InFilenames {
+				f, err := os.Open(filename)
+				if err != nil {
+					fmt.Println("Error", err)
+					continue
+				}
+				dec := json.NewDecoder(f)
+				for {
+					var kv KeyValue
+					if err := dec.Decode(&kv); err != nil {
+						break
+					}
+					kva = append(kva, kv)
+				}
+			}
+
+			sort.Sort(ByKey(kva))
+
+			ofile, _ := os.Create(t.OutFilename)
+
+			//
+			// call Reduce on each distinct key in intermediate[],
+			// and print the result to mr-out-0.
+			//
+			i := 0
+			for i < len(kva) {
+				j := i + 1
+				for j < len(kva) && kva[j].Key == kva[i].Key {
+					j++
+				}
+				values := []string{}
+				for k := i; k < j; k++ {
+					values = append(values, kva[k].Value)
+				}
+				output := reducefn(kva[i].Key, values)
+
+				// this is the correct format for each line of Reduce output.
+				fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
+
+				i = j
+			}
+
+			ofile.Close()
+
 		} else {
 			fmt.Println("Unknown task type", t)
 		}
