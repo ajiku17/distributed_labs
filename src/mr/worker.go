@@ -86,8 +86,6 @@ func Worker(mapf func(string, string) []KeyValue,
 	gob.Register(WaitTask{})
 	gob.Register(PoisonTask{})
 
-	// uncomment to send the Example RPC to the master.
-	// CallExample()
 	mapfn = mapf
 	reducefn = reducef
 
@@ -98,7 +96,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			if status {
 				CallTaskDone(task)
 			} else {
-				fmt.Println("!!!!!!!!!ERROR processing task")
+				fmt.Println("Error processing task")
 			}
 		} else {
 			fmt.Println("Master Didn't respond, Exiting with code 3")
@@ -132,7 +130,8 @@ func ProcessTask(taskObj TaskObject) bool {
 
 			content, err := ioutil.ReadAll(file)
 			if err != nil {
-				log.Fatalf("cannot read %v", t.InFilename)
+				fmt.Printf("cannot read %v", t.InFilename)
+				return false
 			}
 			file.Close()
 			kva := mapfn(t.InFilename, string(content))
@@ -166,13 +165,11 @@ func ProcessTask(taskObj TaskObject) bool {
 				}
 			}
 
-			fmt.Println("RENAMING", tempFiles)
-
 			for reducerID, tmpfile := range tempFiles {
 				tmpfile.Close()
 				err := os.Rename(tmpfile.Name(), fmt.Sprintf("mr-%d-%d", t.MapTaskID, reducerID))
 				if err != nil {
-					fmt.Println("error renaming", err)
+					fmt.Println("Error", err)
 				}
 			}
 
@@ -182,8 +179,6 @@ func ProcessTask(taskObj TaskObject) bool {
 	case REDUCE_TASK:
 		t, ok := taskObj.Task.(ReduceTask)
 		if ok {
-			fmt.Println("Processing reduce task", t)
-
 			kva := []KeyValue{}
 
 			for _, filename := range t.InFilenames {
@@ -211,10 +206,6 @@ func ProcessTask(taskObj TaskObject) bool {
 
 			tmpOut, _ := ioutil.TempFile(".", "tmp-out-*")
 
-			//
-			// call Reduce on each distinct key in intermediate[],
-			// and print the result to mr-out-0.
-			//
 			i := 0
 			for i < len(kva) {
 				j := i + 1
@@ -248,7 +239,6 @@ func ProcessTask(taskObj TaskObject) bool {
 	case WAIT_TASK:
 		t, ok := taskObj.Task.(WaitTask)
 		if ok {
-			fmt.Println("Processing wait task", t)
 			time.Sleep(t.TimeToSleep * time.Second)
 		} else {
 			fmt.Println("Unknown task type", t)
@@ -256,7 +246,6 @@ func ProcessTask(taskObj TaskObject) bool {
 	case POISON_TASK:
 		t, ok := taskObj.Task.(PoisonTask)
 		if ok {
-			fmt.Println("Processing poison task", t)
 			os.Exit(3)
 		} else {
 			fmt.Println("Unknown task type", t)
