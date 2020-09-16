@@ -27,16 +27,6 @@ type Master struct {
 
 // Your code here -- RPC handlers for the worker to call.
 
-//
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func (m *Master) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
-	return nil
-}
-
 func (m *Master) GetNextTaskID() int {
 	m.mu.Lock()
 	defer m.mu.Lock()
@@ -56,7 +46,6 @@ func (m *Master) generateMapTasks(files []string, nReduce int) {
 	mapTaskID := 1
 
 	for _, filename := range files {
-		fmt.Println("chopping up", filename)
 		_, err := os.Stat(filename)
 		if err == nil {
 			task := TaskObject {
@@ -69,8 +58,6 @@ func (m *Master) generateMapTasks(files []string, nReduce int) {
 				},
 			}
 
-			fmt.Println(task)
-
 			mapTaskID++;
 			m.nextTaskID++
 			m.mappers++;
@@ -80,7 +67,6 @@ func (m *Master) generateMapTasks(files []string, nReduce int) {
 			m.doneTasks[task.ID] = false
 
 			m.waitGroup.Add(1)
-			
 		}
 	}
 }
@@ -118,7 +104,6 @@ func (m *Master) clearPhaseTasks() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	fmt.Println("clearing phase tasks")
 	m.currentPhaseTasks = make(map[int]chan int)
 	m.doneTasks = make(map[int]bool)
 	m.unscheduledTasks = []TaskObject{}
@@ -126,30 +111,13 @@ func (m *Master) clearPhaseTasks() {
 }
 
 func (m *Master) PhaseMonitor(files []string, nReduce int) {
-
-	fmt.Println("================== MAP PHASE START ===================")
-	fmt.Println("generating map tasks")
 	m.generateMapTasks(files, nReduce)
-
-	fmt.Println("waiting for map tasks")
 	m.waitGroup.Wait() // wait for map tasks to finish
-	fmt.Println("================== MAP PHASE FINISHED ===================")
-	
 	m.clearPhaseTasks()
 
-	fmt.Println("================== REDUCE PHASE START ===================")
-	fmt.Println("generating reduce tasks")
 	m.generateReduceTasks(nReduce)
-
-	fmt.Println("waiting for reduce tasks tasks")
 	m.waitGroup.Wait() // wait for reduce tasks to finish
-	fmt.Println("================== REDUCE PHASE FINISHED ===================")
-
 	m.clearPhaseTasks()
-	// TODO generate poison tasks (optional)
-	fmt.Println("generating poison tasks")
-
-	fmt.Println("marking self as done")
 	
 	m.mu.Lock()
 	m.done = true
@@ -160,11 +128,9 @@ func (m *Master) MarkTaskAsDone(taskID int) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	fmt.Println("Marking task:", taskID, "as done")
-
 	isDone, ok := m.doneTasks[taskID]
 	if !ok {
-		fmt.Println("received done on unknown task:", taskID)
+		fmt.Println("Error received done on unknown task:", taskID)
 	} else if !isDone {
 		m.doneTasks[taskID] = true
 		m.waitGroup.Done()
@@ -183,8 +149,6 @@ func (m *Master) watchdog(task TaskObject, doneChannel chan int) {
 
 	select {
 	case <- timeout:
-		// TODO reschedule
-		fmt.Println("rescheduling task:", task)
 		m.rescheduleTask(task)
 	case <- doneChannel:
 		m.MarkTaskAsDone(task.ID)
@@ -195,7 +159,6 @@ func (m *Master) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	fmt.Println("Get Task was called. remaining tasks:", m.unscheduledTasks)
 	if len(m.unscheduledTasks) == 0 {
 		taskObj := TaskObject{
 			m.nextTaskID,
@@ -205,7 +168,6 @@ func (m *Master) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 			},
 		}
 		m.nextTaskID++
-		fmt.Println(taskObj)
 		reply.TaskObj = taskObj
 	} else {
 
@@ -273,9 +235,7 @@ func MakeMaster(files []string, nReduce int) *Master {
 	gob.Register(ReduceTask{})
 	gob.Register(MapTask{})
 	gob.Register(WaitTask{})
-	gob.Register(PoisonTask{})
 
-	// Your code here.
 	m.nextTaskID = 1
 	m.currentPhaseTasks = make(map[int]chan int)
 	m.unscheduledTasks = []TaskObject{}

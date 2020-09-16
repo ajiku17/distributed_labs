@@ -17,12 +17,7 @@ const (
 	MAP_TASK int = 1
 	REDUCE_TASK int = 2
 	WAIT_TASK int = 3
-	POISON_TASK int = 4
 )
-
-type PoisonTask struct {
-	
-}
 
 type WaitTask struct {
 	TimeToSleep time.Duration
@@ -84,7 +79,6 @@ func Worker(mapf func(string, string) []KeyValue,
 	gob.Register(ReduceTask{})
 	gob.Register(MapTask{})
 	gob.Register(WaitTask{})
-	gob.Register(PoisonTask{})
 
 	mapfn = mapf
 	reducefn = reducef
@@ -117,7 +111,6 @@ func CallTaskDone(taskObj TaskObject) bool{
 }
 
 func ProcessTask(taskObj TaskObject) bool {
-	fmt.Println("processing task")
 	switch taskObj.TaskType {
 	case MAP_TASK:
 		t, ok := taskObj.Task.(MapTask)
@@ -184,7 +177,6 @@ func ProcessTask(taskObj TaskObject) bool {
 			for _, filename := range t.InFilenames {
 				f, err := os.Open(filename)
 				if err != nil {
-					fmt.Println("Error", err)
 					continue
 				}
 				dec := json.NewDecoder(f)
@@ -195,7 +187,6 @@ func ProcessTask(taskObj TaskObject) bool {
 					}
 					kva = append(kva, kv)
 				}
-
 
 				if err != nil {
 					fmt.Print("Error", err)
@@ -243,23 +234,13 @@ func ProcessTask(taskObj TaskObject) bool {
 		} else {
 			fmt.Println("Unknown task type", t)
 		}
-	case POISON_TASK:
-		t, ok := taskObj.Task.(PoisonTask)
-		if ok {
-			os.Exit(3)
-		} else {
-			fmt.Println("Unknown task type", t)
-		}
-
 	}
 
 	return true
 }
 
 func RequestTask() (TaskObject, bool){
-	fmt.Println("requesting task")
 	t, status := CallGetTask()
-	fmt.Println("received a task", t)
 	return t, status
 }
 
@@ -270,29 +251,6 @@ func CallGetTask() (TaskObject, bool) {
 	status := call("Master.GetTask", &args, &reply)
 	
 	return reply.TaskObj, status
-}
-
-//
-// example function to show how to make an RPC call to the master.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func CallExample() {
-
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	call("Master.Example", &args, &reply)
-
-	// reply.Y should be 100.
-	fmt.Printf("reply.Y %v\n", reply.Y)
 }
 
 //
