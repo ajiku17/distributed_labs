@@ -9,6 +9,7 @@ import (
 	"encoding/gob"
 	"sync"
 	"time"
+	"fmt"
 )
 
 type Master struct {
@@ -96,7 +97,7 @@ func (m *Master) watchdog(taskID int, doneChannel chan int) {
 func (m *Master) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 
 	if len(m.unscheduledTasks) == 0 {
-		task := Task{
+		taskObj := TaskObject{
 			m.GetNextTaskID(),
 			WAIT_TASK,
 			WaitTask{
@@ -104,7 +105,7 @@ func (m *Master) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 			},
 		}
 
-		reply.TaskObj = task
+		reply.TaskObj = taskObj
 	} else {
 		m.mu.Lock()
 		defer m.mu.Unlock()
@@ -177,6 +178,8 @@ func MakeMaster(files []string, nReduce int) *Master {
 	m.nextTaskID = 1
 	m.currentPhaseTasks = make(map[int]chan int)
 	m.done = false
+
+	go m.PhaseMonitor()
 
 	m.server()
 	return &m

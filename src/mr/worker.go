@@ -116,7 +116,7 @@ func ProcessTask(taskObj TaskObject) {
 			fmt.Println("Unknown task type", t)
 		}
 	case WAIT_TASK:
-		t, ok := taskObj.Task..(WaitTask)
+		t, ok := taskObj.Task.(WaitTask)
 		if ok {
 			time.Sleep(t.TimeToSleep * time.Second)
 		} else {
