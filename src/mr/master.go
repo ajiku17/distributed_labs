@@ -184,8 +184,8 @@ func (m *Master) watchdog(task TaskObject, doneChannel chan int) {
 	select {
 	case <- timeout:
 		// TODO reschedule
-		m.rescheduleTask(task)
 		fmt.Println("rescheduling task:", task)
+		m.rescheduleTask(task)
 	case <- doneChannel:
 		m.MarkTaskAsDone(task.ID)
 	}
@@ -195,7 +195,7 @@ func (m *Master) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	fmt.Println("Get Task was called", len(m.unscheduledTasks))
+	fmt.Println("Get Task was called. remaining tasks:", m.unscheduledTasks)
 	if len(m.unscheduledTasks) == 0 {
 		taskObj := TaskObject{
 			m.nextTaskID,
@@ -216,14 +216,11 @@ func (m *Master) GetTask(args *GetTaskArgs, reply *GetTaskReply) error {
 		go m.watchdog(task, m.currentPhaseTasks[task.ID])
 	}
 
-	fmt.Println("get task returns")	
-
 	return nil
 }
 
 func (m *Master) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
 	task := args.TaskObj
-	fmt.Println("in task done", task)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

@@ -108,15 +108,12 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 func CallTaskDone(taskObj TaskObject) bool{
-	fmt.Println("calling task done")
 	args := TaskDoneArgs{}
 	reply := TaskDoneReply{}
 
 	args.TaskObj = taskObj
 
 	status := call("Master.TaskDone", &args, &reply)
-
-	fmt.Println("call task done returned")
 	
 	return status
 }
@@ -169,9 +166,14 @@ func ProcessTask(taskObj TaskObject) bool {
 				}
 			}
 
+			fmt.Println("RENAMING", tempFiles)
+
 			for reducerID, tmpfile := range tempFiles {
 				tmpfile.Close()
-				os.Rename(tmpfile.Name(), fmt.Sprintf("mr-%d-%d", t.MapTaskID, reducerID))
+				err := os.Rename(tmpfile.Name(), fmt.Sprintf("mr-%d-%d", t.MapTaskID, reducerID))
+				if err != nil {
+					fmt.Println("error renaming", err)
+				}
 			}
 
 		} else {
@@ -256,7 +258,7 @@ func ProcessTask(taskObj TaskObject) bool {
 func RequestTask() (TaskObject, bool){
 	fmt.Println("requesting task")
 	t, status := CallGetTask()
-	fmt.Println("received a task")
+	fmt.Println("received a task", t)
 	return t, status
 }
 
@@ -306,9 +308,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	}
 	defer c.Close()
 
-	fmt.Println("calling ...")
 	err = c.Call(rpcname, args, reply)
-	fmt.Println("call returned")
 	if err == nil {
 		return true
 	}
