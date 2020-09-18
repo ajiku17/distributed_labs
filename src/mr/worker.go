@@ -24,9 +24,10 @@ type WaitTask struct {
 }
 
 type MapTask struct {
-	MapTaskID	int
-	InFilename 	string
-	NumReducers int
+	MapTaskID  	 int
+	InFilename   string
+	OutFilenames []string
+	NumReducers  int
 }
 
 type ReduceTask struct {
@@ -160,7 +161,7 @@ func ProcessTask(taskObj TaskObject) bool {
 
 			for reducerID, tmpfile := range tempFiles {
 				tmpfile.Close()
-				err := os.Rename(tmpfile.Name(), fmt.Sprintf("mr-%d-%d", t.MapTaskID, reducerID))
+				err := os.Rename(tmpfile.Name(), t.OutFilenames[reducerID - 1])
 				if err != nil {
 					fmt.Println("Error", err)
 				}

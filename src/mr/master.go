@@ -48,12 +48,18 @@ func (m *Master) generateMapTasks(files []string, nReduce int) {
 	for _, filename := range files {
 		_, err := os.Stat(filename)
 		if err == nil {
+			OutFilenames := []string{}
+			for reducer := 1; reducer <= nReduce; reducer++ {
+				OutFilenames = append(OutFilenames, fmt.Sprintf("mr-%d-%d", mapTaskID, reducer))
+			}
+
 			task := TaskObject {
 				m.nextTaskID,
 				MAP_TASK,
 				MapTask {
 					mapTaskID,
 					filename,
+					OutFilenames,
 					nReduce,
 				},
 			}
