@@ -20,11 +20,25 @@ package raft
 import "sync"
 import "sync/atomic"
 import "../labrpc"
+import "math/rand"
+import "time"
+import "log"
+import "math"
 
 // import "bytes"
 // import "../labgob"
 
+// Constant definitions
+const (
+	STATE_FOLLOWER = 1
+	STATE_CANDIDATE = 2
+	STATE_LEADER = 3
+)
 
+const (
+	COMMAND_APPEND_ENTRIES = 1
+	COMMAND_REQUEST_VOTE = 2
+)
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -43,6 +57,43 @@ type ApplyMsg struct {
 	CommandIndex int
 }
 
+
+//
+//	Command types
+//
+type requestVoteCommandRequest struct {
+	term 	  	 int
+	candidateID  int
+}
+
+type requestVoteCommandResponse struct {
+	term 	  	int
+	voteGranted bool
+}
+
+type appendEntriesCommandRequest struct {
+	term 	 int
+	leaderID int
+}	
+
+type appendEntriesCommandResponse struct {
+	term int
+}	
+
+//
+// A Go object to represent an rpc request
+//
+type CommandObj struct {
+	CommandType int
+	Command interface{}
+}
+
+
+type commandProcessPipe struct {
+	requestedCommand CommandObj
+	responseChannel  chan interface{}	
+}
+
 //
 // A Go object implementing a single Raft peer.
 //
@@ -56,16 +107,19 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-
+	currentState 		  int
+	currentTerm     	  int
+	commandRequestChannel chan commandProcessPipe
+	votedFor			  int
 }
 
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-
-	var term int
-	var isleader bool
 	// Your code here (2A).
+	term := rf.getTerm()
+	isleader := rf.isLeader()
+
 	return term, isleader
 }
 
@@ -109,14 +163,14 @@ func (rf *Raft) readPersist(data []byte) {
 }
 
 
-
-
 //
 // example RequestVote RPC arguments structure.
 // field names must start with capital letters!
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+	Term 	  	 int
+	CandidateID  int
 }
 
 //
@@ -125,13 +179,66 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
+	Term 	    int
+	VoteGranted bool
 }
 
-//
-// example RequestVote RPC handler.
-//
+type AppendEntriesArgs struct {
+	// Your data here (2A, 2B).
+	Term 	 int
+	LeaderID int
+}
+
+type AppendEntriesReply struct {
+	// Your data here (2A).
+	Term int
+}
+
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	pipe := commandProcessPipe{}
+
+	commandRequest := requestVoteCommandRequest{}
+	commandRequest.term = args.Term
+	commandRequest.candidateID = args.CandidateID
+
+	command := CommandObj{}
+	command.CommandType = COMMAND_REQUEST_VOTE
+	command.Command = commandRequest
+	
+	pipe.responseChannel = make(chan interface{}, 1)
+	pipe.requestedCommand = command
+
+	rf.commandRequestChannel <- pipe
+	
+	// TODO: another level of indirection
+	response := (<- pipe.responseChannel).(requestVoteCommandResponse)
+
+	reply.Term = response.term
+	reply.VoteGranted = response.voteGranted
+}
+
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	// Your code here (2A, 2B).
+	pipe := commandProcessPipe{}
+
+	commandRequest := appendEntriesCommandRequest{}
+	commandRequest.term = args.Term
+	commandRequest.leaderID = args.LeaderID
+
+	command := CommandObj{}
+	command.CommandType = COMMAND_APPEND_ENTRIES
+	command.Command = commandRequest
+
+	pipe.responseChannel = make(chan interface{}, 1)
+	pipe.requestedCommand = command
+
+	rf.commandRequestChannel <- pipe
+
+	// TODO: another level of indirection
+	response := (<- pipe.responseChannel).(appendEntriesCommandResponse)
+
+	reply.Term = response.term
 }
 
 //
@@ -168,6 +275,10 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	return ok
 }
 
+func (rf *Raft) sendHeartbeat(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	return ok
+}
 
 //
 // the service using Raft (e.g. a k/v server) wants to start
@@ -215,6 +326,332 @@ func (rf *Raft) killed() bool {
 	return z == 1
 }
 
+/*** Getters and Setters ***/
+
+func (rf *Raft) getState() int {
+	var state int
+	rf.mu.Lock()
+	state = rf.currentState
+	rf.mu.Unlock()
+
+	return state
+}
+
+func (rf *Raft) setState(newState int) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	rf.currentState = newState
+}
+
+func (rf *Raft) setVotedFor(value int) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	rf.votedFor = value
+}
+
+func (rf *Raft) getVotedFor() int {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	return rf.votedFor
+}
+
+func (rf *Raft) getTerm() int {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	return rf.currentTerm
+}
+
+func (rf *Raft) setTerm(newTerm int) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	rf.currentTerm = newTerm
+}
+
+func (rf *Raft) incrementTerm() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	rf.currentTerm++
+}
+
+func (rf *Raft) isLeader() bool {
+	currentState := rf.getState()
+
+	return currentState == STATE_LEADER
+}
+
+func (rf *Raft) getMe() int {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	return rf.me
+}
+
+func (rf* Raft) getPeers() []*labrpc.ClientEnd {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	return rf.peers[:]
+}
+
+// ***********
+
+// TODO
+func (rf* Raft) convertTo(state int, ) {
+	oldState := rf.getState()
+	rf.setState(state)
+	rf.setVotedFor(-1)
+
+	switch state {
+
+	case STATE_FOLLOWER:
+		
+	case STATE_CANDIDATE:
+
+	case STATE_LEADER:
+
+	default:
+		// For debuging purposes
+		log.Printf("Raft %d: Conversion to unknown state - %d", rf.getMe(), state)
+		rf.setState(oldState) 
+	}
+
+	
+}
+
+// **********
+
+/*** Communication ***/
+
+func (rf *Raft) generateTimeoutDuration(from, to int) time.Duration {
+	return time.Duration(from + rand.Intn(to - from))
+}
+
+func (rf *Raft) processAppendEntries(request appendEntriesCommandRequest, responseChannel chan interface{}) {
+
+}
+
+func (rf *Raft) processRequestVote(request requestVoteCommandRequest, responseChannel chan interface{}) {
+	response := requestVoteCommandResponse{}
+
+	currentTerm := rf.getTerm()
+
+	if request.term < currentTerm {
+		response.term = currentTerm
+		response.voteGranted = false
+	} else {
+		votedFor := rf.getVotedFor()
+		if votedFor == -1 || votedFor == request.candidateID {
+			response.term = currentTerm
+			response.voteGranted = true
+			rf.setVotedFor(request.candidateID)
+		}
+	}
+
+	responseChannel <- response
+}	
+
+func (rf *Raft) processCommand(pipe commandProcessPipe) {
+	command := pipe.requestedCommand
+	currentTerm := rf.getTerm()
+
+	switch command.CommandType {
+
+	case COMMAND_APPEND_ENTRIES:
+		appendEntriesCommand := command.Command.(appendEntriesCommandRequest)
+		if currentTerm < appendEntriesCommand.term {
+			rf.convertTo(STATE_FOLLOWER)
+			rf.setTerm(appendEntriesCommand.term)
+		}
+		rf.processAppendEntries(appendEntriesCommand, pipe.responseChannel)
+	case COMMAND_REQUEST_VOTE:
+		requestVoteCommand := command.Command.(requestVoteCommandRequest)
+		if currentTerm < requestVoteCommand.term {
+			rf.convertTo(STATE_FOLLOWER)
+			rf.setTerm(requestVoteCommand.term)
+		}
+		rf.processRequestVote(requestVoteCommand, pipe.responseChannel)
+	default:
+		log.Printf("Raft %d: Unknown Command type %d - command %v\n", rf.getMe(), command.CommandType, command)
+	}
+}
+
+func (rf *Raft) liveFollower() {
+	
+	for rf.getState() == STATE_FOLLOWER {
+
+		heartbeatTimeout := MakeTimer(rf.generateTimeoutDuration(1550, 1750))
+
+		select {
+		case _, ok := <- heartbeatTimeout:
+			if !ok {
+				log.Fatalf("Raft %d: Invalid timer follower", rf.getMe())
+			}
+
+			rf.convertTo(STATE_CANDIDATE)
+			return
+		case rpc := <- rf.commandRequestChannel:
+			rf.processCommand(rpc)
+		}
+
+	}
+}
+
+func (rf* Raft) askForVote(peerIndex int, electionBucket chan int) {
+	currentID := rf.getMe()
+	currentTerm := rf.getTerm()
+
+	args := RequestVoteArgs{}
+	reply := RequestVoteReply{}
+
+	args.CandidateID = currentID
+	args.Term = currentTerm
+	
+	rf.sendRequestVote(peerIndex, &args, &reply)
+
+	if reply.Term > currentTerm {
+		rf.convertTo(STATE_FOLLOWER) // Convert to follower
+	} else {
+		if reply.VoteGranted {
+			electionBucket <- 1
+		} else {
+			electionBucket <- 0
+		}
+	}
+}
+
+func (rf* Raft) startCampaign(electionResult chan bool) {
+	electionBucket := make(chan int, len(rf.peers))
+
+	me := rf.getMe()
+	peers := rf.getPeers()
+
+	for peerIndex, _ := range peers {
+		if peerIndex != me {
+			go rf.askForVote(peerIndex, electionBucket)
+		}
+	}
+
+	votesReceived := 1;
+	rf.setVotedFor(me)
+
+	for i := 0; i < len(peers) - 1; i++ {
+		votesReceived += <- electionBucket 
+		if votesReceived >= int(math.Ceil(float64(len(peers))) / 2.0) {
+			electionResult <- true
+			return
+		}
+	}
+
+	electionResult <- false
+}
+
+func (rf* Raft) requestMajority() chan bool {	
+	electionResult := make(chan bool, 1)
+	
+	go rf.startCampaign(electionResult)
+
+	return electionResult
+}
+
+func (rf* Raft) liveCandidate() {
+
+	for rf.getState() == STATE_CANDIDATE {
+
+		rf.incrementTerm()
+
+		electionTimeout := MakeTimer(rf.generateTimeoutDuration(1600, 1800))
+
+		electionsFinished := rf.requestMajority()
+
+		select {
+		case _, ok := <- electionTimeout:
+			if !ok {
+				log.Fatalf("Raft %d: Invalid timer candidate", rf.getMe())
+			}
+		case electionResult := <- electionsFinished:
+			if electionResult {
+				rf.convertTo(STATE_LEADER)
+			}
+
+		case rpc := <- rf.commandRequestChannel:
+			rf.processCommand(rpc)
+			
+		}
+	}
+}
+
+func (rf* Raft) remindAuthorityTo(me, term, peer int) {
+	args := AppendEntriesArgs{}
+	reply := AppendEntriesReply{}
+
+	args.Term = term
+	args.LeaderID = me
+
+	rf.sendHeartbeat(peer, &args, &reply)
+
+	if reply.Term > term {
+		rf.convertTo(STATE_FOLLOWER)
+	}
+
+}
+
+func (rf *Raft) renewAuthority() {
+	me := rf.getMe()
+	term := rf.getTerm()
+	peers := rf.getPeers()
+
+	for i, _ := range peers {
+		if i != me {
+			go rf.remindAuthorityTo(me, term, i)
+		}
+	}
+}
+
+func (rf *Raft) liveLeader() {
+
+	for rf.getState() == STATE_LEADER {
+		
+		heartbeatTimeout := MakeTimer(rf.generateTimeoutDuration(600, 601))
+
+		select {
+		case _, ok := <- heartbeatTimeout:
+			if !ok {
+				log.Fatalf("Raft %d: Invalid timer leader", rf.getMe())
+			}
+			rf.renewAuthority()
+			heartbeatTimeout = MakeTimer(rf.generateTimeoutDuration(600, 601))
+		case rpc := <- rf.commandRequestChannel:
+			rf.processCommand(rpc)
+		}
+	}
+
+}
+
+func (rf *Raft) live() {
+
+	for {
+		state := rf.getState()
+
+		switch state {
+		case STATE_FOLLOWER: 
+			rf.liveFollower()
+		case STATE_CANDIDATE:
+			rf.liveCandidate()
+		case STATE_LEADER:
+			rf.liveLeader()
+		default:
+			log.Fatalf("Raft %d: Unknown state - %d. Aborting...\n", rf.getMe(), state)
+		}
+
+	}
+}
+
 //
 // the service or tester wants to create a Raft server. the ports
 // of all the Raft servers (including this one) are in peers[]. this
@@ -234,10 +671,15 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
+	rf.commandRequestChannel = make(chan commandProcessPipe, 5) // Arbitrarily chosen channel size
+	rf.currentTerm = 1
+	rf.currentState = STATE_FOLLOWER
+	rf.votedFor = -1;
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
 
+	go rf.live()
 
 	return rf
 }
