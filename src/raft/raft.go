@@ -88,7 +88,6 @@ type CommandObj struct {
 	Command interface{}
 }
 
-
 type commandProcessPipe struct {
 	requestedCommand CommandObj
 	responseChannel  chan interface{}	
@@ -432,13 +431,24 @@ func (rf *Raft) generateTimeoutDuration(from, to int) time.Duration {
 	return time.Duration(from + rand.Intn(to - from))
 }
 
-func (rf *Raft) processAppendEntries(request appendEntriesCommandRequest, responseChannel chan interface{}) {
+func (rf *Raft) processAppendEntries(request appendEntriesCommandRequest, responseChannel chan interface{}) bool {
+	response := appendEntriesCommandResponse{}
+	currentTerm := rf.getTerm()
+	legalRequest := false
 
+
+	if request.term < currentTerm {
+		response.term = currentTerm
+	} else {
+		legalRequest = true
+	}
+
+	responseChannel <- response
+	return legalRequest
 }
 
-func (rf *Raft) processRequestVote(request requestVoteCommandRequest, responseChannel chan interface{}) {
+func (rf *Raft) processRequestVote(request requestVoteCommandRequest, responseChannel chan interface{}) bool {
 	response := requestVoteCommandResponse{}
-
 	currentTerm := rf.getTerm()
 
 	if request.term < currentTerm {
@@ -454,11 +464,13 @@ func (rf *Raft) processRequestVote(request requestVoteCommandRequest, responseCh
 	}
 
 	responseChannel <- response
+	return response.voteGranted
 }	
 
-func (rf *Raft) processCommand(pipe commandProcessPipe) {
+func (rf *Raft) processCommand(pipe commandProcessPipe) bool {
 	command := pipe.requestedCommand
 	currentTerm := rf.getTerm()
+	resetTimer := false
 
 	switch command.CommandType {
 
@@ -468,24 +480,30 @@ func (rf *Raft) processCommand(pipe commandProcessPipe) {
 			rf.convertTo(STATE_FOLLOWER)
 			rf.setTerm(appendEntriesCommand.term)
 		}
-		rf.processAppendEntries(appendEntriesCommand, pipe.responseChannel)
+		resetTimer = rf.processAppendEntries(appendEntriesCommand, pipe.responseChannel)
 	case COMMAND_REQUEST_VOTE:
 		requestVoteCommand := command.Command.(requestVoteCommandRequest)
 		if currentTerm < requestVoteCommand.term {
 			rf.convertTo(STATE_FOLLOWER)
 			rf.setTerm(requestVoteCommand.term)
 		}
-		rf.processRequestVote(requestVoteCommand, pipe.responseChannel)
+		resetTimer = rf.processRequestVote(requestVoteCommand, pipe.responseChannel)
 	default:
 		log.Printf("Raft %d: Unknown Command type %d - command %v\n", rf.getMe(), command.CommandType, command)
 	}
+
+	return resetTimer
 }
 
 func (rf *Raft) liveFollower() {
-	
-	for rf.getState() == STATE_FOLLOWER {
+	resetTimer := true
+	heartbeatTimeout := MakeTimer(rf.generateTimeoutDuration(1550, 1750))
 
-		heartbeatTimeout := MakeTimer(rf.generateTimeoutDuration(1550, 1750))
+	for rf.getState() == STATE_FOLLOWER {
+		
+		if resetTimer {
+			heartbeatTimeout = MakeTimer(rf.generateTimeoutDuration(1550, 1750))
+		}
 
 		select {
 		case _, ok := <- heartbeatTimeout:
@@ -496,7 +514,8 @@ func (rf *Raft) liveFollower() {
 			rf.convertTo(STATE_CANDIDATE)
 			return
 		case rpc := <- rf.commandRequestChannel:
-			rf.processCommand(rpc)
+			// TODO when should you reset the timer ?
+			resetTimer = rf.processCommand(rpc)
 		}
 
 	}
@@ -560,15 +579,12 @@ func (rf* Raft) requestMajority() chan bool {
 }
 
 func (rf* Raft) liveCandidate() {
+	resetTimer := true
+	electionTimeout := MakeTimer(rf.generateTimeoutDuration(1600, 1800))
+	electionsFinished := rf.requestMajority()
+	rf.incrementTerm()
 
 	for rf.getState() == STATE_CANDIDATE {
-
-		rf.incrementTerm()
-
-		electionTimeout := MakeTimer(rf.generateTimeoutDuration(1600, 1800))
-
-		electionsFinished := rf.requestMajority()
-
 		select {
 		case _, ok := <- electionTimeout:
 			if !ok {
@@ -582,6 +598,12 @@ func (rf* Raft) liveCandidate() {
 		case rpc := <- rf.commandRequestChannel:
 			rf.processCommand(rpc)
 			
+		}
+
+		if resetTimer {
+			electionTimeout = MakeTimer(rf.generateTimeoutDuration(1600, 1800))
+			electionsFinished = rf.requestMajority()
+			rf.incrementTerm()
 		}
 	}
 }
@@ -614,11 +636,11 @@ func (rf *Raft) renewAuthority() {
 }
 
 func (rf *Raft) liveLeader() {
+	heartbeatTimeout := MakeTimer(rf.generateTimeoutDuration(600, 601))
+	rf.renewAuthority()
 
 	for rf.getState() == STATE_LEADER {
 		
-		heartbeatTimeout := MakeTimer(rf.generateTimeoutDuration(600, 601))
-
 		select {
 		case _, ok := <- heartbeatTimeout:
 			if !ok {
