@@ -580,7 +580,7 @@ func (rf* Raft) requestMajority() chan bool {
 
 func (rf* Raft) liveCandidate() {
 	resetTimer := true
-	electionTimeout := MakeTimer(rf.generateTimeoutDuration(1600, 1800))
+	electionTimeout := MakeTimer(rf.generateTimeoutDuration(600, 800))
 	electionsFinished := rf.requestMajority()
 	rf.incrementTerm()
 
@@ -601,7 +601,7 @@ func (rf* Raft) liveCandidate() {
 		}
 
 		if resetTimer {
-			electionTimeout = MakeTimer(rf.generateTimeoutDuration(1600, 1800))
+			electionTimeout = MakeTimer(rf.generateTimeoutDuration(600, 800))
 			electionsFinished = rf.requestMajority()
 			rf.incrementTerm()
 		}
